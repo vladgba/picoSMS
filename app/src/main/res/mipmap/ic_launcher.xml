@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 7.x launcher icon (Android 8+ uses mipmap-anydpi-v26/ic_launcher.xml). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="84" android:viewportHeight="84">
+    <group android:translateX="-12" android:translateY="-12">
+        <path android:fillColor="#FF0F9D8A" android:pathData="M54,12a42,42 0,1 1,0 84a42,42 0,1 1,0 -84z" />
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M43,33L65,33A13,13 0,0 1,78 46L78,57A13,13 0,0 1,65 70L50,70L37,79.5L39.5,69.4A13,13 0,0 1,30 57L30,46A13,13 0,0 1,43 33Z" />
+        <path android:fillColor="#FF0F9D8A" android:pathData="M54,44.5a7,7 0,1 1,0 14a7,7 0,1 1,0 -14z" />
+    </group>
+</vector>
