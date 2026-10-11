@@ -64,6 +64,7 @@ object Backup {
             o.put("senders", lines(l.senders))
             o.put("words", lines(l.words))
             o.put("matchBoth", l.both)
+            o.put("hideFromInbox", l.hide)
             labels.put(o)
         }
         root.put("labels", labels)
@@ -104,7 +105,7 @@ object Backup {
         root.optJSONArray("labels")?.let { a ->
             for (i in 0 until a.length()) {
                 val o = a.optJSONObject(i) ?: continue
-                val l = Label(0, o.optString("name").trim(), join(o.optJSONArray("senders")), join(o.optJSONArray("words")), o.optBoolean("matchBoth", false))
+                val l = Label(0, o.optString("name").trim(), join(o.optJSONArray("senders")), join(o.optJSONArray("words")), o.optBoolean("matchBoth", false), o.optBoolean("hideFromInbox", false))
                 if (l.name.isNotEmpty() && (l.senders.isNotEmpty() || l.words.isNotEmpty())) labels.add(l)
             }
         }
@@ -151,7 +152,7 @@ object Backup {
             for (l in existing) haveLabels.add(key(l))
             var room = Labels.MAX - existing.size
             for (l in p.labels) if (room > 0 && haveLabels.add(key(l))) {
-                db.saveLabel(0, l.name, l.senders, l.words, l.both)
+                db.saveLabel(0, l.name, l.senders, l.words, l.both, l.hide)
                 n[1]++
                 room--
             }
@@ -169,7 +170,7 @@ object Backup {
     }
 
     private fun key(r: Rule) = "${r.black}|${r.sMode}|${r.senders}|${r.bMode}|${r.bodies}|${r.cs}"
-    private fun key(l: Label) = "${l.name}|${l.senders}|${l.words}|${l.both}"
+    private fun key(l: Label) = "${l.name}|${l.senders}|${l.words}|${l.both}|${l.hide}"
 
     private fun mode(name: String, def: Int): Int {
         for (i in MODES.indices) if (MODES[i] == name) return i

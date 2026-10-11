@@ -114,7 +114,12 @@ class MainActivity : Activity() {
 
     private fun showFiltered() {
         val sel = selectedIndex()
-        adapter.items = if (sel < 0) all else all.filter { inLabel(it, sel) }
+        adapter.items = if (sel < 0) {
+            // Inbox: everything except conversations in a label marked "hide from Inbox".
+            var hidden = 0L
+            for (i in labels.indices) if (i < Labels.MAX && labels[i].hide) hidden = hidden or (1L shl i)
+            if (hidden == 0L) all else all.filter { it.labels and hidden == 0L }
+        } else all.filter { inLabel(it, sel) }
         adapter.notifyDataSetChanged()
         (empty as TextView).setText(if (sel < 0) R.string.no_messages else R.string.label_empty)
         empty.visibility = if (adapter.items.isEmpty()) View.VISIBLE else View.GONE
@@ -172,6 +177,7 @@ class MainActivity : Activity() {
         val senders = v.findViewById<EditText>(R.id.senders)
         val words = v.findViewById<EditText>(R.id.words)
         val both = v.findViewById<Switch>(R.id.both)
+        val hide = v.findViewById<Switch>(R.id.hide)
         val info = v.findViewById<TextView>(R.id.info)
         val box = v.findViewById<LinearLayout>(R.id.examples)
         if (edit != null) {
@@ -179,6 +185,7 @@ class MainActivity : Activity() {
             senders.setText(edit.senders)
             words.setText(edit.words)
             both.isChecked = edit.both
+            hide.isChecked = edit.hide
         }
         if (addSender != null) senders.setText(addSender)
 
@@ -193,7 +200,7 @@ class MainActivity : Activity() {
             val w = Rules.normalize(words.text.toString(), false, Mode.AUTO)
             var n = name.text.toString().trim()
             if (n.isEmpty()) n = Rules.entries(if (s.isNotEmpty()) s else w, s.isNotEmpty(), Mode.AUTO).firstOrNull() ?: ""
-            return Label(edit?.id ?: 0, n, s, w, both.isChecked)
+            return Label(edit?.id ?: 0, n, s, w, both.isChecked, hide.isChecked)
         }
 
         val refresh = Runnable {
@@ -254,7 +261,7 @@ class MainActivity : Activity() {
             d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val lb = current()
                 if (lb.senders.isEmpty() && lb.words.isEmpty() || Labels.Compiled(lb).invalid) return@setOnClickListener
-                Ui.load({ Db.get(this).saveLabel(lb.id, lb.name, lb.senders, lb.words, lb.both) }) { id ->
+                Ui.load({ Db.get(this).saveLabel(lb.id, lb.name, lb.senders, lb.words, lb.both, lb.hide) }) { id ->
                     Labels.select(this, id)
                     reload()
                 }
@@ -282,7 +289,7 @@ class MainActivity : Activity() {
                 val lb = labels[w]
                 Ui.load({
                     val s = Rules.normalize(lb.senders + "\n" + cv.addr, true, Mode.AUTO)
-                    Db.get(this).saveLabel(lb.id, lb.name, s, lb.words, lb.both)
+                    Db.get(this).saveLabel(lb.id, lb.name, s, lb.words, lb.both, lb.hide)
                 }) {
                     Toast.makeText(this, getString(R.string.added_to_label, lb.name), Toast.LENGTH_SHORT).show()
                     reload()

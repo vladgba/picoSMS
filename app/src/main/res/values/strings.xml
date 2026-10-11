@@ -108,7 +108,7 @@
     <string name="edit">Edit</string>
     <string name="edit_rule">Edit rule</string>
     <string name="pv_invalid_entry">Invalid regular expression: %s</string>
-    <string name="label_all">All</string>
+    <string name="label_all">Inbox</string>
     <string name="label_add">+ Label</string>
     <string name="label_new">New label</string>
     <string name="label_edit">Edit label</string>
@@ -198,4 +198,5 @@
     <string name="set_default_row">Set as default SMS app</string>
     <string name="source_row">Source code\n<small>github.com/vladgba/picoSMS</small></string>
     <string name="privacy_row">Privacy policy</string>
+    <string name="label_hide">Hide from Inbox (show only under this label)</string>
 </resources>

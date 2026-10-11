@@ -6,12 +6,13 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 /** A folder-like label: matches conversations by sender and/or message words. */
-class Label(val id: Long, val name: String, val senders: String, val words: String, val both: Boolean)
+/** [hide] = keep these conversations out of the Inbox (main list); they show only under the label. */
+class Label(val id: Long, val name: String, val senders: String, val words: String, val both: Boolean, val hide: Boolean = false)
 class Picker(val id: Long, val name: String, val regex: String, val enabled: Boolean)
 class Blocked(val id: Long, val addr: String, val body: String, val date: Long, val sub: Int, val reason: String)
 
 /** App-private storage: filter rules and the blocked-message quarantine. */
-class Db private constructor(c: Context) : SQLiteOpenHelper(c, "pico.db", null, 5) {
+class Db private constructor(c: Context) : SQLiteOpenHelper(c, "pico.db", null, 6) {
 
     override fun onCreate(db: SQLiteDatabase) {
         createRules(db, "rules")
@@ -26,6 +27,8 @@ class Db private constructor(c: Context) : SQLiteOpenHelper(c, "pico.db", null, 
         if (from < 4) migrateRules(db)
         // v2–v4 pickers tables lack "enabled" (a table created above for v1 already has it).
         if (from in 2..4) db.execSQL("ALTER TABLE pickers ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        // v3–v5 labels tables lack "hide" (a table created above for v1–v2 already has it).
+        if (from in 3..5) db.execSQL("ALTER TABLE labels ADD COLUMN hide INTEGER NOT NULL DEFAULT 0")
     }
 
     private fun createRules(db: SQLiteDatabase, table: String) = db.execSQL(
@@ -56,23 +59,24 @@ class Db private constructor(c: Context) : SQLiteOpenHelper(c, "pico.db", null, 
     }
 
     private fun createLabels(db: SQLiteDatabase) =
-        db.execSQL("CREATE TABLE IF NOT EXISTS labels(_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, senders TEXT NOT NULL, words TEXT NOT NULL, both_ INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS labels(_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, senders TEXT NOT NULL, words TEXT NOT NULL, both_ INTEGER NOT NULL, hide INTEGER NOT NULL DEFAULT 0)")
 
     fun labels(): List<Label> {
         val out = ArrayList<Label>()
-        readableDatabase.rawQuery("SELECT _id, name, senders, words, both_ FROM labels ORDER BY _id", null).use {
-            while (it.moveToNext()) out.add(Label(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getInt(4) != 0))
+        readableDatabase.rawQuery("SELECT _id, name, senders, words, both_, hide FROM labels ORDER BY _id", null).use {
+            while (it.moveToNext()) out.add(Label(it.getLong(0), it.getString(1), it.getString(2), it.getString(3), it.getInt(4) != 0, it.getInt(5) != 0))
         }
         return out
     }
 
     /** Inserts (id <= 0) or updates a label. @return its id. */
-    fun saveLabel(id: Long, name: String, senders: String, words: String, both: Boolean): Long {
+    fun saveLabel(id: Long, name: String, senders: String, words: String, both: Boolean, hide: Boolean): Long {
         val v = ContentValues()
         v.put("name", name)
         v.put("senders", senders)
         v.put("words", words)
         v.put("both_", if (both) 1 else 0)
+        v.put("hide", if (hide) 1 else 0)
         if (id > 0) {
             writableDatabase.update("labels", v, "_id=$id", null)
             return id
