@@ -83,18 +83,14 @@ Release builds use **R8 in full mode** with code and resource shrinking (`isMini
 - Regex uses `java.util.regex` directly rather than Kotlin's `Regex` and sequence wrappers, which cuts Kotlin library code to about 6 KB
 - The Android 7 launcher icon is a vector, so the APK carries no PNGs (Android 8+ uses the adaptive icon)
 
-### Signing
+### Versioning and signing
 
-Create a `keystore.properties` file in the project root (it's git-ignored):
+Versioning and signing come from `gradle/android-common.gradle`, the same shared script used across projects:
 
-```properties
-storeFile=release.jks
-storePassword=...
-keyAlias=picosms
-keyPassword=...
-```
-
-Without that file the release APK is built unsigned.
+- **Version:** `version.properties` holds `major`/`minor`/`patch`. `versionName` is `M.m.p` and `versionCode` is `M*10000 + m*100 + p`. Bump it with `gradlew bumpPatch`, `bumpMinor` or `bumpMajor`, and check it with `gradlew printVersion`.
+- **Release key:** taken from `keystore.properties` in the project root if present (git-ignored), otherwise from `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS` and `RELEASE_KEY_PASSWORD`. Those can be environment variables, `-P` options or entries in `~/.gradle/gradle.properties`.
+- **No key found:** the release build is signed with the debug key and a warning is printed. Use `-Pandroid.common.unsigned=true` for an unsigned build.
+- **APK name:** the output is named `picoSMS-<version>-release.apk`.
 
 ## Project layout
 
