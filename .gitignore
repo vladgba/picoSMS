@@ -35,3 +35,8 @@ app/release/*
 
 # Android Profiling
 *.hprof
+# Agent & AI tool configurations
+.mcp.json
+.agents/
+.agentsroom/
+.claude/
