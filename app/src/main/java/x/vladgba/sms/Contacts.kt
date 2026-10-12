@@ -14,9 +14,11 @@ object Contacts {
         c.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
     fun name(c: Context, addr: String): String? {
+        // Permission may change while this process (and its cache) stays alive.
+        if (addr.isBlank() || !can(c)) return null
         synchronized(cache) { cache[addr]?.let { return it.ifEmpty { null } } }
         var n: String? = null
-        if (addr.isNotBlank() && can(c)) {
+        run {
             try {
                 val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(addr))
                 c.contentResolver.query(uri, arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)

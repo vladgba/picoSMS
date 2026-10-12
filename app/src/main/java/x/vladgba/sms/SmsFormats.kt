@@ -2,11 +2,17 @@ package x.vladgba.sms
 
 import java.io.Reader
 import java.io.Writer
+import java.io.Closeable
+import java.io.InputStream
+import java.io.OutputStream
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.crypto.Cipher
+import javax.crypto.CipherOutputStream
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
@@ -34,13 +40,16 @@ class BakMsg {
     var subject: String? = null
 }
 
+/** Compare complete values: a hash collision or a different sender must not discard an SMS. */
+internal data class MessageKey(val date: Long, val type: Int, val address: String, val body: String)
+
 interface MsgWriter {
     fun begin(count: Int)
     fun write(m: BakMsg, contact: String?)
     fun end()
 }
 
-interface MsgReader {
+interface MsgReader : Closeable {
     /** Message count declared in the file header, or -1 if unknown. */
     val declared: Int
 
@@ -107,6 +116,7 @@ class XmlOut(private val w: Writer) : MsgWriter {
  * &#55357;&#56832;, '>' inside attribute values).
  */
 class XmlIn(private val r: Reader) : MsgReader {
+    override fun close() = r.close()
     override var declared = -1
         private set
     override var mmsSkipped = 0
@@ -115,6 +125,9 @@ class XmlIn(private val r: Reader) : MsgReader {
     private val buf = CharArray(16384)
     private var len = 0
     private var pos = 0
+    private var rootSeen = false
+    private var rootClosed = false
+    private var selfClosing = false
 
     private fun read(): Int {
         if (pos >= len) {
@@ -129,12 +142,22 @@ class XmlIn(private val r: Reader) : MsgReader {
         while (true) {
             var c = read()
             while (c != -1 && c != '<'.code) c = read()
-            if (c == -1) return null
+            if (c == -1) {
+                require(rootSeen && rootClosed) { "Incomplete XML backup" }
+                return null
+            }
             c = read()
             when (c) {
-                -1 -> return null
+                -1 -> throw IllegalArgumentException("Incomplete XML tag")
                 '!'.code -> skipSpecial()
-                '?'.code, '/'.code -> skipTag()
+                '?'.code -> skipTag()
+                '/'.code -> {
+                    val end = StringBuilder()
+                    c = read()
+                    while (c != -1 && c != '>'.code) { end.append(c.toChar()); c = read() }
+                    require(c != -1) { "Incomplete XML closing tag" }
+                    if (end.toString().trim() == "smses") rootClosed = true
+                }
                 else -> {
                     val name = StringBuilder()
                     name.append(c.toChar())
@@ -143,13 +166,23 @@ class XmlIn(private val r: Reader) : MsgReader {
                         if (c == -1 || c == '>'.code || c == '/'.code || c <= ' '.code) break
                         name.append(c.toChar())
                     }
-                    if (c == '>'.code) {
+                    require(c != -1) { "Incomplete XML tag" }
+                    require(!rootClosed) { "Data after XML backup" }
+                    if (c == '>'.code && name.toString() != "smses") {
                         if (name.toString() == "mms") mmsSkipped++
                         continue
                     }
                     when (name.toString()) {
-                        "sms" -> return toMsg(attrs(c))
-                        "smses" -> declared = attrs(c)["count"]?.toIntOrNull() ?: -1
+                        "sms" -> {
+                            require(rootSeen) { "Missing smses root" }
+                            return toMsg(attrs(c))
+                        }
+                        "smses" -> {
+                            require(!rootSeen) { "Duplicate smses root" }
+                            rootSeen = true
+                            declared = attrs(c)["count"]?.toIntOrNull() ?: -1
+                            rootClosed = selfClosing
+                        }
                         "mms" -> { mmsSkipped++; skipTag() }
                         else -> skipTag()
                     }
@@ -189,13 +222,17 @@ class XmlIn(private val r: Reader) : MsgReader {
 
     private fun attrs(first: Int): HashMap<String, String> {
         val out = HashMap<String, String>()
+        selfClosing = false
         var c = first
         while (true) {
             while (c != -1 && c <= ' '.code) c = read()
-            if (c == -1 || c == '>'.code) return out
+            if (c == -1) throw IllegalArgumentException("Unterminated XML tag")
+            if (c == '>'.code) return out
             if (c == '/'.code) {
                 c = read()
-                continue
+                require(c == '>'.code) { "Invalid XML closing delimiter" }
+                selfClosing = true
+                return out
             }
             val name = StringBuilder()
             while (c != -1 && c != '='.code && c > ' '.code && c != '>'.code && c != '/'.code) {
@@ -211,7 +248,8 @@ class XmlIn(private val r: Reader) : MsgReader {
             val v = StringBuilder()
             while (true) {
                 c = read()
-                if (c == -1 || c == q) break
+                if (c == -1) throw IllegalArgumentException("Unterminated XML attribute")
+                if (c == q) break
                 if (c == '&'.code) entity(v) else v.append(c.toChar())
             }
             out[name.toString()] = v.toString()
@@ -254,7 +292,7 @@ class XmlIn(private val r: Reader) : MsgReader {
     private fun toMsg(a: Map<String, String>): BakMsg {
         val m = BakMsg()
         m.address = a["address"]?.let { if (it == "null") "" else it } ?: ""
-        m.body = a["body"]?.let { if (it == "null") "" else it } ?: ""
+        m.body = a["body"] ?: ""
         m.date = a["date"]?.toLongOrNull() ?: 0L
         m.dateSent = a["date_sent"]?.toLongOrNull() ?: 0L
         m.type = a["type"]?.toIntOrNull() ?: 1
@@ -327,6 +365,7 @@ class JsonOut(private val w: Writer) : MsgWriter {
  * A small tokenizer; unknown keys and nested values are skipped.
  */
 class JsonIn(private val r: Reader) : MsgReader {
+    override fun close() = r.close()
     override var declared = -1
         private set
     override val mmsSkipped = 0
@@ -336,6 +375,8 @@ class JsonIn(private val r: Reader) : MsgReader {
     private var pos = 0
     private var peeked = -2
     private var state = 0 // 0 = before messages, 1 = inside messages array, 2 = done
+    private var wrapped = false
+    private var firstMessage = true
 
     private fun raw(): Int {
         if (pos >= len) {
@@ -370,13 +411,17 @@ class JsonIn(private val r: Reader) : MsgReader {
 
     override fun next(): BakMsg? {
         if (state == 0) {
+            if (peek() == 0xFEFF) read()
             when (peek()) {
                 '['.code -> { read(); state = 1 }
                 '{'.code -> {
+                    wrapped = true
                     read()
+                    var first = true
                     while (state == 0) {
-                        if (peek() == '}'.code) { read(); state = 2; break }
-                        if (peek() == ','.code) { read(); continue }
+                        if (peek() == '}'.code) throw IllegalArgumentException("Missing messages array")
+                        if (!first) expect(',')
+                        first = false
                         val key = string()
                         expect(':')
                         when (key) {
@@ -390,17 +435,31 @@ class JsonIn(private val r: Reader) : MsgReader {
             }
         }
         if (state != 1) return null
-        if (peek() == ','.code) read()
         if (peek() == ']'.code) {
             read()
+            if (wrapped) {
+                while (peek() != '}'.code) {
+                    expect(',')
+                    val key = string()
+                    expect(':')
+                    val v = value()
+                    if (key == "count") declared = (v as? Long)?.toInt() ?: -1
+                }
+                expect('}')
+            }
+            require(peek() == -1) { "Trailing data in JSON backup" }
             state = 2
             return null
         }
+        if (!firstMessage) expect(',')
+        firstMessage = false
         expect('{')
         val m = BakMsg()
+        var firstField = true
         while (true) {
             if (peek() == '}'.code) { read(); break }
-            if (peek() == ','.code) { read(); continue }
+            if (!firstField) expect(',')
+            firstField = false
             val k = string()
             expect(':')
             val v = value()
@@ -430,17 +489,19 @@ class JsonIn(private val r: Reader) : MsgReader {
     }
 
     /** String, Long, Double, Boolean or null; arrays and objects are skipped (returned as null). */
-    private fun value(): Any? {
+    private fun value(depth: Int = 0): Any? {
+        require(depth < 128) { "JSON nesting is too deep" }
         val c = peek()
         return when {
             c == '"'.code -> string()
-            c == '{'.code || c == '['.code -> { skipNested(); null }
-            c == 't'.code -> { word(); true }
-            c == 'f'.code -> { word(); false }
-            c == 'n'.code -> { word(); null }
+            c == '{'.code || c == '['.code -> { skipNested(depth); null }
+            c == 't'.code -> { require(word() == "true") { "Invalid JSON literal" }; true }
+            c == 'f'.code -> { require(word() == "false") { "Invalid JSON literal" }; false }
+            c == 'n'.code -> { require(word() == "null") { "Invalid JSON literal" }; null }
             else -> {
                 val w = word()
-                w.toLongOrNull() ?: w.toDoubleOrNull()
+                require(NUMBER.matcher(w).matches()) { "Invalid JSON number" }
+                w.toLongOrNull() ?: w.toDoubleOrNull() ?: throw IllegalArgumentException("Invalid JSON number")
             }
         }
     }
@@ -468,6 +529,7 @@ class JsonIn(private val r: Reader) : MsgReader {
             if (c == -1) throw IllegalArgumentException("Unterminated string")
             if (c == '"'.code) return b.toString()
             if (c != '\\'.code) {
+                require(c >= ' '.code) { "Unescaped control character in JSON string" }
                 b.append(c.toChar())
                 continue
             }
@@ -479,30 +541,37 @@ class JsonIn(private val r: Reader) : MsgReader {
                 'f'.code -> b.append('\u000C')
                 'u'.code -> {
                     var cp = 0
-                    for (i in 0 until 4) cp = cp * 16 + Character.digit(read(), 16)
+                    for (i in 0 until 4) {
+                        val digit = Character.digit(read(), 16)
+                        require(digit >= 0) { "Invalid Unicode escape" }
+                        cp = cp * 16 + digit
+                    }
                     b.append(cp.toChar())
                 }
-                else -> b.append(e.toChar())
+                '"'.code, '\\'.code, '/'.code -> b.append(e.toChar())
+                else -> throw IllegalArgumentException("Invalid JSON escape")
             }
         }
     }
 
-    private fun skipNested() {
-        var depth = 0
-        var inStr = false
+    private fun skipNested(depth: Int) {
+        val objectValue = read() == '{'.code
+        val end = if (objectValue) '}' else ']'
+        var first = true
         while (true) {
-            val c = read()
-            if (c == -1) return
-            if (inStr) {
-                if (c == '\\'.code) read() else if (c == '"'.code) inStr = false
-                continue
+            if (peek() == end.code) { read(); return }
+            if (!first) expect(',')
+            first = false
+            if (objectValue) {
+                string()
+                expect(':')
             }
-            when (c) {
-                '"'.code -> inStr = true
-                '{'.code, '['.code -> depth++
-                '}'.code, ']'.code -> { depth--; if (depth == 0) return }
-            }
+            value(depth + 1)
         }
+    }
+
+    companion object {
+        private val NUMBER = java.util.regex.Pattern.compile("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?")
     }
 }
 
@@ -528,6 +597,13 @@ object Crypt {
 
     /** [sha256] needs Android 8+ to decrypt; SHA1 is the fallback for Android 7. */
     fun encrypt(plain: ByteArray, pw: CharArray, sha256: Boolean): ByteArray {
+        val out = ByteArrayOutputStream()
+        encrypting(out, pw, sha256).use { it.write(plain) }
+        return out.toByteArray()
+    }
+
+    /** Writes the authenticated header, then encrypts incremental writes including the final tag. */
+    fun encrypting(out: OutputStream, pw: CharArray, sha256: Boolean): OutputStream {
         val rnd = SecureRandom()
         val salt = ByteArray(16).also { rnd.nextBytes(it) }
         val iv = ByteArray(12).also { rnd.nextBytes(it) }
@@ -545,27 +621,45 @@ object Crypt {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.ENCRYPT_MODE, key(pw, salt, iter, kdf), GCMParameterSpec(128, iv))
         c.updateAAD(header)
-        val ct = c.doFinal(plain)
-        val out = ByteArray(HEADER + ct.size)
-        System.arraycopy(header, 0, out, 0, HEADER)
-        System.arraycopy(ct, 0, out, HEADER, ct.size)
-        return out
+        out.write(header)
+        return CipherOutputStream(out, c)
     }
 
     /** @throws WrongPassword when the password is wrong or the file was modified. */
     fun decrypt(data: ByteArray, pw: CharArray): ByteArray {
-        if (data.size < HEADER + 16 || !isEncrypted(data, data.size)) throw IllegalArgumentException("Not encrypted")
-        val kdf = data[4].toInt()
-        val iter = ((data[5].toInt() and 0xFF) shl 24) or ((data[6].toInt() and 0xFF) shl 16) or
-            ((data[7].toInt() and 0xFF) shl 8) or (data[8].toInt() and 0xFF)
+        val out = ByteArrayOutputStream()
+        decrypt(ByteArrayInputStream(data), out, pw)
+        return out.toByteArray()
+    }
+
+    /** [out] must remain private until this returns: authentication is checked at the end. */
+    fun decrypt(input: InputStream, out: OutputStream, pw: CharArray) {
+        val header = ByteArray(HEADER)
+        var offset = 0
+        while (offset < HEADER) {
+            val n = input.read(header, offset, HEADER - offset)
+            require(n > 0) { "Incomplete encrypted header" }
+            offset += n
+        }
+        require(isEncrypted(header, HEADER)) { "Not encrypted" }
+        val kdf = header[4].toInt()
+        require(kdf == 1 || kdf == 2) { "Bad key derivation algorithm" }
+        val iter = ((header[5].toInt() and 0xFF) shl 24) or ((header[6].toInt() and 0xFF) shl 16) or
+            ((header[7].toInt() and 0xFF) shl 8) or (header[8].toInt() and 0xFF)
         if (iter < 1000 || iter > 10_000_000) throw IllegalArgumentException("Bad header")
-        val salt = data.copyOfRange(9, 25)
-        val iv = data.copyOfRange(25, 37)
+        val salt = header.copyOfRange(9, 25)
+        val iv = header.copyOfRange(25, 37)
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.DECRYPT_MODE, key(pw, salt, iter, kdf), GCMParameterSpec(128, iv))
-        c.updateAAD(data, 0, HEADER)
+        c.updateAAD(header)
         try {
-            return c.doFinal(data, HEADER, data.size - HEADER)
+            val buf = ByteArray(65536)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                if (n > 0) c.update(buf, 0, n)?.let { out.write(it) }
+            }
+            out.write(c.doFinal())
         } catch (_: javax.crypto.AEADBadTagException) {
             throw WrongPassword()
         }

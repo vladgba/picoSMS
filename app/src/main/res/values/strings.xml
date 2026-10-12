@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="r_storage_failed">Could not save to inbox</string>
     <string name="app_name">picoSMS</string>
     <string name="widget_name">picoSMS messages</string>
     <string name="widget_desc">Latest conversations with one-tap OTP copy</string>

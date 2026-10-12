@@ -42,10 +42,12 @@ object Apply {
             if (hits.isNotEmpty() && !Sms.isDefault(c)) return -1
             val db = Db.get(c)
             val m = Rules.Matcher(r)
-            for (h in hits) if (Sms.deleteMsg(c, h.id) > 0) {
+            for (h in hits) {
                 val reason = Rules.reason(c, m, h.addr, h.body)
-                db.addBlocked(h.addr, h.body, h.date, h.sub, reason)
-                n++
+                // Keep an intact copy before touching the system provider.
+                val blockedId = db.addBlocked(h.addr, h.body, h.date, h.sub, reason)
+                if (Sms.deleteMsg(c, h.id) > 0) n++
+                else db.removeBlocked(blockedId)
             }
         } else {
             for (h in hits) if (restore(c, Blocked(h.id, h.addr, h.body, h.date, h.sub, ""))) n++
@@ -55,7 +57,7 @@ object Apply {
     }
 
     fun restore(c: Context, b: Blocked): Boolean {
-        if (Sms.insertIncoming(c, b.addr, b.body, b.date, b.sub, read = true) == null) return false
+        if (Sms.insertIncoming(c, b.addr, b.body, b.date, b.sub, read = true, date = b.date) == null) return false
         Db.get(c).removeBlocked(b.id)
         return true
     }

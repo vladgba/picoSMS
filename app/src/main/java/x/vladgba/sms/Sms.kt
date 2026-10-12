@@ -118,11 +118,12 @@ object Sms {
         return 0
     }
 
-    fun insertIncoming(c: Context, addr: String, body: String, sent: Long, sub: Int, read: Boolean = false): Uri? {
+    fun insertIncoming(c: Context, addr: String, body: String, sent: Long, sub: Int, read: Boolean = false,
+                       date: Long = System.currentTimeMillis()): Uri? {
         val v = ContentValues()
         v.put("address", addr)
         v.put("body", body)
-        v.put("date", System.currentTimeMillis())
+        v.put("date", date)
         v.put("date_sent", sent)
         v.put("read", if (read) 1 else 0)
         v.put("seen", if (read) 1 else 0)

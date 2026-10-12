@@ -93,17 +93,20 @@ class ThreadActivity : Activity() {
         var body: String? = i.getStringExtra("sms_body") ?: i.getStringExtra(Intent.EXTRA_TEXT)
         val scheme = data?.scheme
         if (data != null && (scheme == "sms" || scheme == "smsto" || scheme == "mms" || scheme == "mmsto")) {
-            val ssp = data.schemeSpecificPart ?: ""
-            addr = ssp.substringBefore('?').takeIf { it.isNotBlank() }
+            val ssp = data.encodedSchemeSpecificPart ?: ""
+            addr = Uri.decode(ssp.substringBefore('?')).takeIf { Sender.split(it).isNotEmpty() }
             val q = ssp.indexOf('?')
             if (body == null && q >= 0) {
-                val query = "&" + ssp.substring(q + 1)
-                val i = query.indexOf("&body=")
-                if (i >= 0) body = Uri.decode(query.substring(i + 6).substringBefore('&'))
+                for (param in ssp.substring(q + 1).split('&')) {
+                    if (Uri.decode(param.substringBefore('=')) == "body") {
+                        body = Uri.decode(param.substringAfter('=', ""))
+                        break
+                    }
+                }
             }
         } else {
             tid = i.getLongExtra(EXTRA_TID, -1)
-            addr = i.getStringExtra(EXTRA_ADDR)
+            addr = i.getStringExtra(EXTRA_ADDR)?.takeIf { Sender.split(it).isNotEmpty() }
         }
         if (!body.isNullOrEmpty()) input.setText(body)
 
@@ -188,14 +191,19 @@ class ThreadActivity : Activity() {
         }
         input.setText("")
         Ui.load({
-            for (r in recipients) Sender.send(this, r, text)
-            if (tid < 0) Sms.threadFor(this, recipients[0]) else tid
-        }) {
+            val failed = recipients.filter { !Sender.send(this, it, text) }
+            (if (tid < 0) Sms.threadFor(this, recipients[0]) else tid) to failed
+        }) { (thread, failed) ->
+            if (failed.isNotEmpty()) {
+                if (input.text.isEmpty()) input.setText(text)
+                if (recipients.size > 1) { addr = failed.joinToString(", "); tid = -1 }
+                Toast.makeText(this, R.string.failed, Toast.LENGTH_LONG).show()
+            }
             if (addr == null) {
                 addr = if (recipients.size == 1) recipients[0] else target
                 header()
             }
-            if (recipients.size == 1) tid = it
+            if (recipients.size == 1) tid = thread
             reload()
             list.setSelection(adapter.count - 1)
         }
@@ -235,7 +243,7 @@ class ThreadActivity : Activity() {
         opts += R.string.forward to { startActivity(intent(this, -1, null).putExtra("sms_body", m.body)) }
         if (m.type == Sms.FAILED) opts += R.string.resend to {
             val a = addr
-            if (a != null) Ui.bg { Sms.deleteMsg(this, m.id); Sender.send(this, a, m.body) }
+            if (a != null) Ui.bg { if (Sender.send(this, a, m.body)) Sms.deleteMsg(this, m.id) }
         }
         opts += R.string.delete to { Ui.bg { Sms.deleteMsg(this, m.id) } }
         AlertDialog.Builder(this)

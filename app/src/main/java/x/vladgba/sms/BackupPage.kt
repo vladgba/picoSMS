@@ -44,7 +44,13 @@ class BackupPage(a: SettingsActivity) : Page(a, R.layout.page_backup) {
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         val uri = data?.data
-        if (res != Activity.RESULT_OK || uri == null) return
+        if (res != Activity.RESULT_OK || uri == null) {
+            if (req == BACKUP) {
+                a.pendingBackup?.password?.fill('\u0000')
+                a.pendingBackup = null
+            }
+            return
+        }
         if (req == EXPORT) Ui.load({
             try {
                 val json = Backup.export(this)
@@ -55,9 +61,11 @@ class BackupPage(a: SettingsActivity) : Page(a, R.layout.page_backup) {
             }
         }) { ok -> Toast.makeText(this, if (ok) R.string.exported else R.string.export_failed, Toast.LENGTH_SHORT).show() }
         else if (req == BACKUP) {
-            val pw = pendingPw
-            pendingPw = null
-            runBackup(uri, pendingJson, pw)
+            val request = a.pendingBackup
+            a.pendingBackup = null
+            // After process death the password is gone; never silently write plaintext instead.
+            if (request == null) Toast.makeText(this, R.string.export_failed, Toast.LENGTH_LONG).show()
+            else runBackup(uri, request.json, request.password)
         } else if (req == RESTORE) Ui.load({
             try {
                 SmsBackup.isEncrypted(this, uri)
@@ -68,8 +76,15 @@ class BackupPage(a: SettingsActivity) : Page(a, R.layout.page_backup) {
         else if (req == IMPORT) Ui.load({
             try {
                 contentResolver.openInputStream(uri)!!.use { input ->
-                    val bytes = input.readBytes()
-                    if (bytes.size > 2_000_000) null else Backup.parse(String(bytes, Charsets.UTF_8))
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(8192)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        require(out.size() + n <= 2_000_000) { "Settings file is too large" }
+                        out.write(buf, 0, n)
+                    }
+                    Backup.parse(out.toString("UTF-8"))
                 }
             } catch (_: Exception) {
                 null
@@ -88,9 +103,6 @@ class BackupPage(a: SettingsActivity) : Page(a, R.layout.page_backup) {
     }
 
     // ---- SMS backup / restore ----
-
-    private var pendingJson = false
-    private var pendingPw: CharArray? = null
 
     @Suppress("DEPRECATION")
     private fun backupDialog() {
@@ -116,20 +128,24 @@ class BackupPage(a: SettingsActivity) : Page(a, R.layout.page_backup) {
                     pw2.error = getString(R.string.bk_pw_mismatch)
                     return@setOnClickListener
                 }
-                pendingJson = json.isChecked
-                pendingPw = if (pw.text.isEmpty()) null else CharArray(pw.text.length) { i -> pw.text[i] }
+                val request = SettingsActivity.PendingBackup(json.isChecked,
+                    if (pw.text.isEmpty()) null else CharArray(pw.text.length) { i -> pw.text[i] })
+                a.pendingBackup?.password?.fill('\u0000')
+                a.pendingBackup = request
                 pw.text.clear()
                 pw2.text.clear()
                 d.dismiss()
                 val day = android.text.format.DateFormat.format("yyyy-MM-dd", System.currentTimeMillis())
-                val ext = if (pendingJson) "json" else "xml"
-                val enc = pendingPw != null
+                val ext = if (request.json) "json" else "xml"
+                val enc = request.password != null
                 val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                    .setType(if (enc) "application/octet-stream" else if (pendingJson) "application/json" else "text/xml")
+                    .setType(if (enc) "application/octet-stream" else if (request.json) "application/json" else "text/xml")
                     .putExtra(Intent.EXTRA_TITLE, "picoSMS-sms-$day.$ext" + if (enc) ".enc" else "")
                 try {
                     a.startActivityForResult(i, BACKUP)
                 } catch (_: Exception) {
+                    request.password?.fill('\u0000')
+                    a.pendingBackup = null
                     Toast.makeText(this, R.string.no_file_picker, Toast.LENGTH_SHORT).show()
                 }
             }
@@ -204,9 +220,10 @@ class BackupPage(a: SettingsActivity) : Page(a, R.layout.page_backup) {
         Thread {
             var wrong = false
             val res = try {
-                val src = SmsBackup.open(app, uri, pw)
-                val r = SmsBackup.restore(app, src) { a, b ->
-                    set(if (b > 0) getString(R.string.rs_working_of, a, b) else getString(R.string.rs_working, a))
+                val r = SmsBackup.open(app, uri, pw).use { src ->
+                    SmsBackup.restore(app, src) { a, b ->
+                        set(if (b > 0) getString(R.string.rs_working_of, a, b) else getString(R.string.rs_working, a))
+                    }
                 }
                 var msg = getString(R.string.rs_done, r.added, r.duplicates)
                 if (r.mms > 0) msg += getString(R.string.rs_done_mms, r.mms)

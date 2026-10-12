@@ -23,6 +23,7 @@ import android.widget.TextView
 class PickersPage(a: SettingsActivity) : Page(a, R.layout.page_pickers) {
     private val adapter = PickerAdapter()
     private lateinit var none: View
+    private lateinit var otpSwitch: Switch
 
     init {
         val list = findViewById<ListView>(R.id.list)
@@ -32,6 +33,7 @@ class PickersPage(a: SettingsActivity) : Page(a, R.layout.page_pickers) {
         none = header.findViewById(R.id.noPickers)
 
         val otp = header.findViewById<Switch>(R.id.swOtp)
+        otpSwitch = otp
         otp.isChecked = Picks.otpEnabled(this)
         otp.setOnCheckedChangeListener { _, on -> Picks.setOtpEnabled(this, on) }
 
@@ -59,7 +61,10 @@ class PickersPage(a: SettingsActivity) : Page(a, R.layout.page_pickers) {
     }
 
 
-    override fun onShow() = reload()
+    override fun onShow() {
+        otpSwitch.isChecked = Picks.otpEnabled(this)
+        reload()
+    }
 
     private fun reload() {
         Ui.load({ Db.get(this).pickers() }) {

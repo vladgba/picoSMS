@@ -55,7 +55,7 @@ android {
     }
 
     lint {
-        abortOnError = false
+        abortOnError = true
     }
 }
 
@@ -71,3 +71,6 @@ kotlin {
 }
 
 // No dependencies: only the Android framework and the Kotlin stdlib (added by the Kotlin plugin).
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+}

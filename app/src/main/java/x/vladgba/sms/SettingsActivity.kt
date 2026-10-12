@@ -13,6 +13,8 @@ import android.widget.TextView
 
 /** Settings with tabs: Filters, Blocked, Quick pick, Backup, About. */
 class SettingsActivity : Activity() {
+    class PendingBackup(val json: Boolean, val password: CharArray?)
+    var pendingBackup: PendingBackup? = null
     private lateinit var bar: LinearLayout
     private lateinit var content: FrameLayout
     private lateinit var action: ImageButton
@@ -21,6 +23,7 @@ class SettingsActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        pendingBackup = lastNonConfigurationInstance as? PendingBackup
         setContentView(R.layout.activity_settings)
         Ui.edge(this, findViewById(R.id.root))
         bar = findViewById(R.id.tabs)
@@ -34,6 +37,17 @@ class SettingsActivity : Activity() {
     override fun onSaveInstanceState(out: Bundle) {
         super.onSaveInstanceState(out)
         out.putInt("tab", current)
+    }
+
+    @Deprecated("framework callback")
+    override fun onRetainNonConfigurationInstance(): Any? = pendingBackup
+
+    override fun onDestroy() {
+        if (!isChangingConfigurations) {
+            pendingBackup?.password?.fill('\u0000')
+            pendingBackup = null
+        }
+        super.onDestroy()
     }
 
     override fun onResume() {

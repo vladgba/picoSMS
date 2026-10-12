@@ -22,8 +22,8 @@ jobs:
       # gradlew was committed from Windows without the executable bit
       - run: chmod +x gradlew
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug lint --stacktrace
+      - name: Test and build debug APK
+        run: ./gradlew testDebugUnitTest assembleDebug lint --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:

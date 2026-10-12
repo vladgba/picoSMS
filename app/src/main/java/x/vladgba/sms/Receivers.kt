@@ -23,11 +23,14 @@ class SmsReceiver : BroadcastReceiver() {
         val sent = first.timestampMillis
         val sub = i.getIntExtra("android.telephony.extra.SUBSCRIPTION_INDEX", i.getIntExtra("subscription", -1))
         async {
-            val reason = Rules.check(c, addr, body)
+            // A broken filter must not discard an incoming message.
+            val reason = try { Rules.check(c, addr, body) } catch (_: Exception) { null }
             if (reason != null) {
                 Db.get(c).addBlocked(addr, body, System.currentTimeMillis(), sub, reason)
             } else {
                 val uri = Sms.insertIncoming(c, addr, body, sent, sub)
+                if (uri == null) Db.get(c).addBlocked(addr, body, System.currentTimeMillis(), sub,
+                    c.getString(R.string.r_storage_failed))
                 val tid = if (uri != null) Sms.threadOf(c, uri) else -1
                 Notifier.message(c, tid, addr, body, Picks.forMessage(c, body))
                 Widget.update(c)
@@ -49,10 +52,10 @@ class SentReceiver : BroadcastReceiver() {
         val uri = i.data ?: return
         if (uri.scheme != "content") return
         val ok = resultCode == Activity.RESULT_OK
-        val last = i.getIntExtra("p", 0) == i.getIntExtra("n", 1) - 1
         async {
-            if (!ok) Sms.setType(c, uri, Sms.FAILED)
-            else if (last) Sms.setType(c, uri, Sms.SENT, onlyIfNot = Sms.FAILED)
+            val type = Db.get(c).sentPart(uri.toString(), i.getIntExtra("p", 0), ok)
+            if (type != null) Sms.setType(c, uri, type, onlyIfNot = if (type == Sms.SENT) Sms.FAILED else -1)
+            Widget.update(c)
         }
     }
 }
@@ -69,7 +72,7 @@ class ActionReceiver : BroadcastReceiver() {
         val reply = if (i.action == REPLY) RemoteInput.getResultsFromIntent(i)
             ?.getCharSequence(Notifier.KEY_REPLY)?.toString() else null
         async {
-            if (!reply.isNullOrBlank() && addr != null) Sender.send(c, addr, reply)
+            if (!reply.isNullOrBlank() && addr != null && !Sender.send(c, addr, reply)) return@async
             if (tid >= 0) Sms.markRead(c, tid)
             Notifier.cancel(c, tid)
             Widget.update(c)

@@ -32,12 +32,17 @@ object Sender {
         return out
     }
 
-    fun send(c: Context, addr: String, text: String) {
+    fun send(c: Context, addr: String, text: String): Boolean {
+        if (addr.isBlank() || text.isBlank()) return false
         // As default SMS app we must write outgoing messages to the provider ourselves.
-        val uri = if (Sms.isDefault(c)) Sms.insertOutgoing(c, addr, text) else null
+        val default = Sms.isDefault(c)
+        val uri = if (default) Sms.insertOutgoing(c, addr, text) else null
+        if (default && uri == null) return false
         try {
             val sm = manager(c)
             val parts = sm.divideMessage(text)
+            if (parts.isEmpty()) throw IllegalArgumentException("Empty message")
+            if (uri != null) Db.get(c).startSend(uri.toString(), parts.size)
             val data = uri ?: Uri.parse("pico://sent/" + System.nanoTime())
             val pis = ArrayList<PendingIntent>(parts.size)
             for (i in parts.indices) {
@@ -47,8 +52,13 @@ object Sender {
             }
             if (parts.size > 1) sm.sendMultipartTextMessage(addr, null, parts, pis, null)
             else sm.sendTextMessage(addr, null, text, pis[0], null)
+            return true
         } catch (_: Exception) {
-            if (uri != null) Sms.setType(c, uri, Sms.FAILED)
+            if (uri != null) {
+                Sms.setType(c, uri, Sms.FAILED)
+                runCatching { Db.get(c).clearSend(uri.toString()) }
+            }
+            return false
         }
     }
 }

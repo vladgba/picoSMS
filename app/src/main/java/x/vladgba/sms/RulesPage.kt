@@ -31,6 +31,8 @@ class RulesPage(a: SettingsActivity) : Page(a, R.layout.page_rules) {
     private val adapter = RuleAdapter()
     private lateinit var noRules: View
     private lateinit var blockedRow: TextView
+    private lateinit var whitelistSwitch: Switch
+    private lateinit var contactsSwitch: Switch
 
     /** Sender field of the open rule dialog, filled by the contact picker. */
     private var pickTarget: EditText? = null
@@ -45,6 +47,8 @@ class RulesPage(a: SettingsActivity) : Page(a, R.layout.page_rules) {
 
         val wl = header.findViewById<Switch>(R.id.swWhitelist)
         val ct = header.findViewById<Switch>(R.id.swContacts)
+        whitelistSwitch = wl
+        contactsSwitch = ct
         wl.isChecked = Rules.whitelistMode(this)
         ct.isChecked = Rules.allowContacts(this)
         wl.setOnCheckedChangeListener { _, on -> Rules.setWhitelistMode(this, on) }
@@ -64,6 +68,8 @@ class RulesPage(a: SettingsActivity) : Page(a, R.layout.page_rules) {
 
 
     override fun onShow() {
+        whitelistSwitch.isChecked = Rules.whitelistMode(this)
+        contactsSwitch.isChecked = Rules.allowContacts(this)
         reload()
     }
 
