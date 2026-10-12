@@ -8,6 +8,14 @@
 
 picoSMS is an ultralight SMS app for Android. The whole release APK is about **120 KB**. It is built only on the Android framework and the Kotlin standard library: no AndroidX, no Google Play Services, no analytics, no ads. The app doesn't request the `INTERNET` permission at all.
 
+## Download a test build
+
+Open [Android CI builds](https://github.com/vladgba/picoSMS/actions/workflows/android.yml?query=branch%3Amain), select the latest successful run on `main`, and download **pico-sms-debug-apk** from its **Artifacts** section. You must be signed in to GitHub to download the artifact.
+
+On your Android phone, extract the downloaded ZIP and open `app-debug.apk`. If prompted, allow installation from the browser or file manager you used. These are debug builds; their signing key may differ from an already installed copy of picoSMS, which prevents installing them as an update.
+
+The workflow link above stays the same across builds. Individual run and artifact links identify a specific build, and artifacts expire according to GitHub's retention settings (90 days by default). See [GitHub's artifact download instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts).
+
 ## Features
 
 - **Default SMS app.** Receives, sends and stores SMS in the system message store, so other apps and backups keep working.
